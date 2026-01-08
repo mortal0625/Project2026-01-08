@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>行程與看板</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 20px; background-color: #f4f4f9; color: #333; }
+        .container { max-width: 1200px; margin: auto; }
+        h1, h2 { color: #333; text-align: center; }
+
+        .task-form { display: flex; gap: 10px; margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 8px; background-color: #fff; }
+        .task-form input[type="text"] { flex-grow: 1; padding: 10px; border: 1px solid #ccc; border-radius: 4px; }
+        .task-form input[type="datetime-local"] { padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+        .task-form button { padding: 10px 20px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.3s; }
+        
+        .calendar-container { padding: 20px; background-color: #fff; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 30px; }
+        .calendar-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .calendar-header button { background: none; border: 1px solid #ccc; padding: 5px 10px; border-radius: 4px; cursor: pointer; }
+        #monthYear { font-size: 1.5em; font-weight: bold; }
+        .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+        .calendar-day-name { font-weight: bold; text-align: center; padding: 5px; font-size: 0.9em; color: #666; }
+        .calendar-day { border: 1px solid #e9e9e9; min-height: 100px; padding: 5px; font-size: 0.85em; }
+        .calendar-day.today { background-color: #e7f3ff; }
+        .calendar-day-number { font-weight: bold; }
+        .tasks-in-day { margin-top: 5px; }
+        .task-item-calendar { display: flex; justify-content: space-between; align-items: center; background-color: #cce5ff; border-left: 3px solid #007bff; padding: 3px 5px; border-radius: 3px; font-size: 0.9em; margin-bottom: 3px; word-wrap: break-word; }
+        
+        .kanban-board { margin-top: 30px; }
+        .kanban-container { display: flex; gap: 20px; justify-content: space-between; }
+        .kanban-column { background-color: #f0f2f5; width: 32%; padding: 15px; border-radius: 8px; }
+        .kanban-column h3 { text-align: center; margin-top: 0; }
+        .kanban-cards { min-height: 200px; }
+        .kanban-card { background-color: #fff; padding: 10px; border-radius: 5px; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: grab; position: relative; }
+        .kanban-card.dragging { opacity: 0.5; }
+        .kanban-card .card-content { padding-right: 20px; }
+        .kanban-card .card-date { font-size: 0.8em; color: #666; margin-top: 5px; }
+
+        .delete-btn {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            background: none;
+            border: none;
+            font-size: 16px;
+            color: #aaa;
+            cursor: pointer;
+            display: none; /* Initially hidden */
+        }
+        .kanban-card:hover .delete-btn { display: block; } /* Show on hover */
+        .task-item-calendar .delete-btn { 
+            background: none; border: none; color: #007bff; cursor: pointer; font-size: 14px; margin-left: 5px;
+        }
+
+        .error-message { color: red; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>我的行程與看板</h1>
+
+        <div class="task-form">
+            <input type="text" id="taskInput" placeholder="輸入新的行程...">
+            <input type="datetime-local" id="datetimeInput">
+            <button onclick="addTask()">新增行程</button>
+        </div>
+
+        <div class="calendar-container">
+            <h2>行程日曆</h2>
+            <div class="calendar-header">
+                <button id="prevMonth">‹ 上個月</button>
+                <h2 id="monthYear"></h2>
+                <button id="nextMonth">下個月 ›</button>
+            </div>
+            <div class="calendar-grid" id="calendarDaysNames"></div>
+            <div class="calendar-grid" id="calendar"></div>
+        </div>
+        
+        <div class="kanban-board">
+            <h2>工作看板</h2>
+            <div class="kanban-container">
+                <div class="kanban-column" id="todo" ondragover="allowDrop(event)" ondrop="drop(event)">
+                    <h3>待辦 (To Do)</h3>
+                    <div class="kanban-cards"></div>
+                </div>
+                <div class="kanban-column" id="inprogress" ondragover="allowDrop(event)" ondrop="drop(event)">
+                    <h3>進行中 (In Progress)</h3>
+                    <div class="kanban-cards"></div>
+                </div>
+                <div class="kanban-column" id="done" ondragover="allowDrop(event)" ondrop="drop(event)">
+                    <h3>已完成 (Done)</h3>
+                    <div class="kanban-cards"></div>
+                </div>
+            </div>
+        </div>
+        
+        <div id="errorMessage" class="error-message" style="display: none;"></div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://127.0.0.1:5000';
+        let currentDate = new Date();
+        let allTasks = [];
+
+        // --- Main Setup ---
+        document.addEventListener('DOMContentLoaded', async function() {
+            setDefaultDatetimeInput();
+            document.getElementById('prevMonth').addEventListener('click', () => changeMonth(-1));
+            document.getElementById('nextMonth').addEventListener('click', () => changeMonth(1));
+            await refreshData();
+        });
+
+        function setDefaultDatetimeInput() {
+            const today = new Date();
+            const year = today.getFullYear();
+            const month = String(today.getMonth() + 1).padStart(2, '0');
+            const day = String(today.getDate()).padStart(2, '0');
+            const hours = String(today.getHours()).padStart(2, '0');
+            const minutes = String(today.getMinutes()).padStart(2, '0');
+            document.getElementById('datetimeInput').value = `${year}-${month}-${day}T${hours}:${minutes}`;
+        }
+
+        async function refreshData() {
+            await fetchTasks();
+            renderCalendar();
+            renderKanbanBoard();
+        }
+
+        function changeMonth(offset) {
+            currentDate.setMonth(currentDate.getMonth() + offset);
+            renderCalendar();
+        }
+
+        // --- API Calls ---
+        async function fetchTasks() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/tasks`);
+                if (!response.ok) throw new Error('Cannot fetch tasks');
+                allTasks = await response.json();
+            } catch (error) {
+                console.error('Error fetching tasks:', error);
+                showErrorMessage('無法載入行程。');
+            }
+        }
+        
+        async function addTask() {
+            const taskInput = document.getElementById('taskInput');
+            const datetimeInput = document.getElementById('datetimeInput');
+            const description = taskInput.value.trim();
+            const datetime = datetimeInput.value;
+
+            if (!description || !datetime) {
+                showErrorMessage('行程內容和日期時間不能為空。');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/tasks`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ description, date: datetime, status: 'todo' })
+                });
+
+                if (!response.ok) throw new Error('Failed to add task');
+                
+                taskInput.value = '';
+                setDefaultDatetimeInput();
+                hideErrorMessage();
+                await refreshData();
+            } catch (error) {
+                console.error('Error adding task:', error);
+                showErrorMessage('新增行程失敗。');
+            }
+        }
+
+        async function updateTaskStatus(taskId, newStatus) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/tasks/${taskId}/status`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status: newStatus })
+                });
+                 if (!response.ok) throw new Error('Failed to update task status');
+                 await refreshData();
+            } catch (error) {
+                console.error('Error updating status:', error);
+                showErrorMessage('更新狀態失敗。');
+            }
+        }
+
+        async function deleteTask(taskId) {
+            if (!confirm('確定要刪除這個行程嗎？')) {
+                return;
+            }
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/tasks/${taskId}`, {
+                    method: 'DELETE',
+                });
+                if (!response.ok) throw new Error('Failed to delete task');
+                await refreshData();
+            } catch (error) {
+                console.error('Error deleting task:', error);
+                showErrorMessage('刪除行程失敗。');
+            }
+        }
+
+        // --- Rendering ---
+        function renderCalendar() {
+            const calendar = document.getElementById('calendar');
+            calendar.innerHTML = '';
+            // ... (rest of calendar rendering)
+            const year = currentDate.getFullYear();
+            const month = currentDate.getMonth();
+            document.getElementById('monthYear').textContent = `${year}年 ${month + 1}月`;
+            const firstDayOfMonth = new Date(year, month, 1);
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            const startingDay = firstDayOfMonth.getDay();
+
+            const dayNamesContainer = document.getElementById('calendarDaysNames');
+            if (dayNamesContainer.childElementCount === 0) {
+                const dayNames = ['日', '一', '二', '三', '四', '五', '六'];
+                dayNames.forEach(day => {
+                    dayNamesContainer.appendChild(document.createElement('div')).className = 'calendar-day-name';
+                    dayNamesContainer.lastChild.textContent = day;
+                });
+            }
+
+            for (let i = 0; i < startingDay; i++) {
+                calendar.appendChild(document.createElement('div')).className = 'calendar-day';
+            }
+
+            for (let day = 1; day <= daysInMonth; day++) {
+                const dayCell = document.createElement('div');
+                dayCell.className = 'calendar-day';
+                dayCell.innerHTML = `<div class="calendar-day-number">${day}</div>`;
+                const dateOnlyStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                
+                const today = new Date();
+                if (year === today.getFullYear() && month === today.getMonth() && day === today.getDate()) {
+                    dayCell.classList.add('today');
+                }
+
+                const tasksForDay = allTasks.filter(task => task.date && task.date.startsWith(dateOnlyStr));
+                if (tasksForDay.length > 0) {
+                    const tasksContainer = document.createElement('div');
+                    tasksContainer.className = 'tasks-in-day';
+                    tasksForDay.forEach(task => {
+                        const taskElement = document.createElement('div');
+                        taskElement.className = 'task-item-calendar';
+                        const displayTime = new Date(task.date).toLocaleTimeString('zh-TW', {hour: '2-digit', minute:'2-digit'});
+                        taskElement.innerHTML = `
+                            <span>${displayTime} ${task.description}</span>
+                            <button class="delete-btn" onclick="deleteTask(${task.id})">✖</button>
+                        `;
+                        tasksContainer.appendChild(taskElement);
+                    });
+                    dayCell.appendChild(tasksContainer);
+                }
+                calendar.appendChild(dayCell);
+            }
+        }
+
+        function renderKanbanBoard() {
+            document.querySelectorAll('.kanban-cards').forEach(col => col.innerHTML = '');
+            allTasks.forEach(task => {
+                const card = document.createElement('div');
+                card.className = 'kanban-card';
+                card.setAttribute('draggable', 'true');
+                card.setAttribute('data-task-id', task.id);
+                const displayDateTime = task.date ? new Date(task.date).toLocaleString('zh-TW', { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+                card.innerHTML = `
+                    <div class="card-content">${task.description}</div>
+                    <div class="card-date">${displayDateTime}</div>
+                    <button class="delete-btn" onclick="deleteTask(${task.id})">✖</button>
+                `;
+                card.addEventListener('dragstart', dragStart);
+
+                const column = document.getElementById(task.status);
+                if (column) {
+                    column.querySelector('.kanban-cards').appendChild(card);
+                }
+            });
+        }
+
+        // --- Drag and Drop Handlers ---
+        function dragStart(event) {
+            event.dataTransfer.setData('text/plain', event.target.dataset.taskId);
+            setTimeout(() => { event.target.classList.add('dragging'); }, 0);
+        }
+
+        function allowDrop(event) {
+            event.preventDefault();
+        }
+
+        function drop(event) {
+            event.preventDefault();
+            const taskId = event.dataTransfer.getData('text/plain');
+            document.querySelector(`[data-task-id="${taskId}"]`)?.classList.remove('dragging');
+            let targetColumn = event.target;
+            while(targetColumn && !targetColumn.classList.contains('kanban-column')) {
+                targetColumn = targetColumn.parentElement;
+            }
+            if (targetColumn && targetColumn.id) {
+                updateTaskStatus(taskId, targetColumn.id);
+            }
+        }
+
+        // --- Error Handling ---
+        function showErrorMessage(message) {
+            document.getElementById('errorMessage').textContent = message;
+            document.getElementById('errorMessage').style.display = 'block';
+        }
+
+        function hideErrorMessage() {
+            document.getElementById('errorMessage').style.display = 'none';
+        }
+    </script>
+</body>
+</html>
