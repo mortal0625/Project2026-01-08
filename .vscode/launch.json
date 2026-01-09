@@ -1,0 +1,17 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        
+        {
+            "name": "Python: Camera Stream Example",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/IvanAIproject/Example/camera_stream.py",
+            "console": "integratedTerminal",
+            "python": "${workspaceFolder}/IvanAIproject/backend/.venv/Scripts/python.exe",
+            "env": {
+                "FLASK_ENV": "development"
+            }
+        }
+    ]
+}

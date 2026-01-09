@@ -1,0 +1,11 @@
+# 相機個人設定檔 (內含私人 IP)
+camera_config.txt
+
+# Python 虛擬環境
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# VS Code 設定
+.vscode/
